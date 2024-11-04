@@ -2,7 +2,7 @@ import 'package:mongo_dart/mongo_dart.dart';
 
 class NotificationModel {
   final bool isPushOn;
-  final String scheduledTaskId;
+  final ObjectId scheduledTaskId;
   final DateTime lastModified;
 
   NotificationModel({
@@ -14,7 +14,7 @@ class NotificationModel {
   factory NotificationModel.fromMap(Map<String, dynamic> map) {
     return NotificationModel(
       isPushOn: map['isPushOn'] as bool,
-      scheduledTaskId: map['scheduledTaskId'] as String,
+      scheduledTaskId: map['scheduledTaskId'] as ObjectId,
       lastModified: DateTime.parse(map['lastModified']),
     );
   }

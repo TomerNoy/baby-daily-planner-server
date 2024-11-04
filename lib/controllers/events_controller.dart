@@ -1,5 +1,4 @@
 import 'package:myserver/controllers/global_functions.dart';
-import 'package:myserver/controllers/notifications_controller.dart';
 import 'package:myserver/controllers/responses.dart';
 import 'package:myserver/services/services.dart';
 import 'package:shelf/shelf.dart';
@@ -63,21 +62,21 @@ class EventsController {
     final eventStringId = mongoService.generateId();
     event['id'] = eventStringId;
 
-    final isPushOn = event['isPushOn'] as bool?;
+    // final isPushOn = event['isPushOn'] as bool?;
+    //
+    // if (isPushOn == null) {
+    //   loggerService.error('isPushOn was null', StackTrace.current);
+    // }
 
-    if (isPushOn == null) {
-      loggerService.error('isPushOn was null', StackTrace.current);
-    }
-
-    if (isPushOn!) {
-      final taskUuid = await NotificationsController.createNotificationTask(
-        userId: userId,
-        eventId: eventStringId,
-        time: event['time'] as String,
-      );
-
-      loggerService.debug('addNotification task: $taskUuid');
-    }
+    // if (isPushOn!) {
+    //   final taskUuid = await NotificationsController.createNotificationTask(
+    //     userId: userId,
+    //     eventId: eventStringId,
+    //     time: event['time'] as String,
+    //   );
+    //
+    //   loggerService.debug('addNotification task: $taskUuid');
+    // }
 
     final newEvent = await mongoService.addEventToUser(userId, event);
     if (newEvent == null) {

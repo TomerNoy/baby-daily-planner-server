@@ -1,51 +1,62 @@
+import 'package:myserver/models/notification.dart';
+
 enum EventType { sleep, feed, other }
 
 enum SleepType { start, end }
 
-// todo: other event is the same as parent maybe just return the parent
-abstract class IBabyEvent {
-  IBabyEvent({
+abstract class IEventModel {
+  IEventModel({
     required this.eventType,
     required this.id,
     required this.time,
-    required this.isPushOn,
+    required this.notificationModel,
     this.message = '',
-  });
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
 
   final String id;
   final DateTime time;
+  final DateTime createdAt;
   final String message;
   final EventType eventType;
-  bool isPushOn;
+  final NotificationModel notificationModel;
 
-  static IBabyEvent mapToEvent(Map<String, dynamic> map) {
+  factory IEventModel.fromMap(Map<String, dynamic> map) {
     final timeRaw = map['time'];
+    final createdAtRaw = map['createdAt'];
 
-    if (timeRaw == null) {
+    if (timeRaw == null || createdAtRaw == null) {
       throw Exception('event time is null');
     }
 
-    List<String> parts = timeRaw.split(":");
+    final time = DateTime.tryParse(timeRaw);
+    final createdAt = DateTime.tryParse(createdAtRaw);
 
-    var time = DateTime.now().copyWith(
-      hour: int.parse(parts[0]),
-      minute: int.parse(parts[1]),
-      second: 0,
+    if (time == null || createdAt == null) {
+      throw Exception('event time format is invalid');
+    }
+
+    final eventType = EventType.values.firstWhere(
+      (e) => e.name == map['eventType'],
     );
 
-    switch (map['eventType']) {
-      case 'feed':
-        return FeedEvent(
+    switch (eventType) {
+      case EventType.feed:
+        return FeedEventModel(
           time: time,
+          createdAt: createdAt,
           amount: map['amount'] as int,
           message: map['message'] ?? '',
           id: map['id'],
           eventType: EventType.feed,
-          isPushOn: map['isPushOn'],
+          notificationModel: NotificationModel.fromMap(
+            map['notificationModel'],
+          ),
         );
-      case 'sleep':
-        return SleepEvent(
+      case EventType.sleep:
+        return SleepEventModel(
           time: time,
+          createdAt: createdAt,
           sleepType: SleepType.values.firstWhere(
             (e) => e.name == map['sleepType'],
           ),
@@ -53,18 +64,21 @@ abstract class IBabyEvent {
           message: map['message'] ?? '',
           id: map['id'],
           eventType: EventType.sleep,
-          isPushOn: map['isPushOn'],
+          notificationModel: NotificationModel.fromMap(
+            map['notificationModel'],
+          ),
         );
-      case 'other':
-        return OtherEvent(
+      case EventType.other:
+        return OtherEventModel(
           time: time,
+          createdAt: createdAt,
           message: map['message'] ?? '',
           id: map['id'],
           eventType: EventType.other,
-          isPushOn: map['isPushOn'],
+          notificationModel: NotificationModel.fromMap(
+            map['notificationModel'],
+          ),
         );
-      default:
-        throw Exception('Event type "${map['type']}" not recognized');
     }
   }
 
@@ -74,32 +88,36 @@ abstract class IBabyEvent {
       'time': '${time.hour}:${time.minute}',
       'message': message,
       'eventType': eventType.name,
-      'isPushOn': isPushOn,
+      'notificationModel': notificationModel.toMap(),
+      'createdAt': createdAt.toIso8601String(),
     };
   }
 
   @override
   String toString() {
-    return 'IBabyEvent{id: $id, time: $time, message: $message, eventType: $eventType, isPushOn: $isPushOn}';
+    return 'IEventModel{id: $id, time: $time, createdAt: $createdAt, message: $message, eventType: $eventType, notificationModel: $notificationModel}';
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is IBabyEvent && runtimeType == other.runtimeType && id == other.id;
+      other is IEventModel &&
+          runtimeType == other.runtimeType &&
+          id == other.id;
 
   @override
   int get hashCode => Object.hash(runtimeType, id);
 }
 
-class SleepEvent extends IBabyEvent {
-  SleepEvent({
+class SleepEventModel extends IEventModel {
+  SleepEventModel({
     required super.eventType,
     required super.id,
     required super.time,
+    required super.createdAt,
     required this.sleepType,
     required this.linkedID,
-    required super.isPushOn,
+    required super.notificationModel,
     super.message,
   });
 
@@ -122,14 +140,15 @@ class SleepEvent extends IBabyEvent {
   }
 }
 
-class FeedEvent extends IBabyEvent {
-  FeedEvent({
+class FeedEventModel extends IEventModel {
+  FeedEventModel({
     required super.eventType,
     required super.id,
     required super.time,
+    required super.createdAt,
     required this.amount,
+    required super.notificationModel,
     super.message = '',
-    super.isPushOn = true,
   });
 
   final int amount;
@@ -147,12 +166,13 @@ class FeedEvent extends IBabyEvent {
   String toString() => '${super.toString()}, amount: $amount}';
 }
 
-class OtherEvent extends IBabyEvent {
-  OtherEvent({
+class OtherEventModel extends IEventModel {
+  OtherEventModel({
     required super.eventType,
     required super.id,
     required super.time,
+    required super.notificationModel,
+    required super.createdAt,
     super.message = '',
-    super.isPushOn = true,
   });
 }

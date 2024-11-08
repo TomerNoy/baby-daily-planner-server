@@ -1,4 +1,6 @@
+import 'package:mongo_dart/mongo_dart.dart';
 import 'package:myserver/models/notification.dart';
+import 'package:myserver/services/services.dart';
 
 enum EventType { sleep, feed, other }
 
@@ -6,89 +8,170 @@ enum SleepType { start, end }
 
 abstract class IEventModel {
   IEventModel({
-    required this.eventType,
-    required this.id,
-    required this.time,
-    required this.notificationModel,
-    this.message = '',
+    ObjectId? id,
     DateTime? createdAt,
-  }) : createdAt = createdAt ?? DateTime.now();
+    required this.eventType,
+    required this.notificationModel,
+    required this.time,
+    this.message = '',
+  })  : createdAt = createdAt ?? DateTime.now(),
+        id = id ?? ObjectId();
 
-  final String id;
+  final ObjectId id;
   final DateTime time;
   final DateTime createdAt;
   final String message;
   final EventType eventType;
   final NotificationModel notificationModel;
 
+  static IEventModel? createEvent(Map<String, dynamic> event) {
+    try {
+      final eventType = EventType.values.firstWhere(
+        (e) => e.name == event['eventType'],
+      );
+
+      final time = DateTime.tryParse(event['time']);
+      if (time == null) {
+        throw Exception('event time format is invalid');
+      }
+
+      final createdAt = DateTime.now();
+
+      final id = ObjectId();
+
+      final message = event['message'] ?? '';
+
+      final notificationModel = NotificationModel(
+        isPushOn: event['notificationModel']['isPushOn'] as bool,
+      );
+
+      return switch (eventType) {
+        EventType.sleep => SleepEventModel(
+            time: time,
+            createdAt: createdAt,
+            sleepType: SleepType.values.firstWhere(
+              (e) => e.name == event['sleepType'],
+            ),
+            linkedID: event['linkedID'] as String,
+            message: message,
+            id: id,
+            eventType: eventType,
+            notificationModel: notificationModel,
+          ),
+        EventType.feed => FeedEventModel(
+            time: time,
+            createdAt: createdAt,
+            message: message,
+            id: id,
+            eventType: eventType,
+            notificationModel: notificationModel,
+            amount: event['amount'] as int),
+        EventType.other => OtherEventModel(
+            time: time,
+            createdAt: createdAt,
+            message: message,
+            id: id,
+            eventType: eventType,
+            notificationModel: notificationModel,
+          )
+      };
+    } catch (e, st) {
+      loggerService.error('Error creating IEventModel: $e', st);
+      return null;
+    }
+  }
+
   factory IEventModel.fromMap(Map<String, dynamic> map) {
-    final timeRaw = map['time'];
-    final createdAtRaw = map['createdAt'];
+    loggerService.debug('IEventModel.fromMap: $map');
 
-    if (timeRaw == null || createdAtRaw == null) {
-      throw Exception('event time is null');
-    }
+    try {
+      final timeRaw = map['time'];
+      final createdAtRaw = map['createdAt'];
 
-    final time = DateTime.tryParse(timeRaw);
-    final createdAt = DateTime.tryParse(createdAtRaw);
+      if (timeRaw == null || createdAtRaw == null) {
+        throw Exception('event time is null');
+      }
 
-    if (time == null || createdAt == null) {
-      throw Exception('event time format is invalid');
-    }
+      final time = DateTime.tryParse(timeRaw);
+      final createdAt = DateTime.tryParse(createdAtRaw);
 
-    final eventType = EventType.values.firstWhere(
-      (e) => e.name == map['eventType'],
-    );
+      loggerService.debug('time: $time, createdAt: $createdAt');
 
-    switch (eventType) {
-      case EventType.feed:
-        return FeedEventModel(
-          time: time,
-          createdAt: createdAt,
-          amount: map['amount'] as int,
-          message: map['message'] ?? '',
-          id: map['id'],
-          eventType: EventType.feed,
-          notificationModel: NotificationModel.fromMap(
-            map['notificationModel'],
+      if (time == null || createdAt == null) {
+        throw Exception('event time format is invalid');
+      }
+
+      final eventType = EventType.values.firstWhere(
+        (e) => e.name == map['eventType'],
+      );
+
+      final id = switch (map['id']) {
+        ObjectId _id => _id,
+        String _id => ObjectId.fromHexString(_id),
+        _ => throw ArgumentError('Unsupported ID type'),
+      };
+
+      final message = map['message'] ?? '';
+
+      final notificationModel = NotificationModel.fromMap(
+        map['notificationModel'],
+      );
+
+      return switch (eventType) {
+        EventType.feed => FeedEventModel(
+            time: time,
+            createdAt: createdAt,
+            amount: map['amount'] as int,
+            message: message,
+            id: id,
+            eventType: eventType,
+            notificationModel: notificationModel,
           ),
-        );
-      case EventType.sleep:
-        return SleepEventModel(
-          time: time,
-          createdAt: createdAt,
-          sleepType: SleepType.values.firstWhere(
-            (e) => e.name == map['sleepType'],
+        EventType.sleep => SleepEventModel(
+            time: time,
+            createdAt: createdAt,
+            sleepType: SleepType.values.firstWhere(
+              (e) => e.name == map['sleepType'],
+            ),
+            linkedID: map['linkedID'],
+            message: message,
+            id: id,
+            eventType: eventType,
+            notificationModel: notificationModel,
           ),
-          linkedID: map['linkedID'],
-          message: map['message'] ?? '',
-          id: map['id'],
-          eventType: EventType.sleep,
-          notificationModel: NotificationModel.fromMap(
-            map['notificationModel'],
-          ),
-        );
-      case EventType.other:
-        return OtherEventModel(
-          time: time,
-          createdAt: createdAt,
-          message: map['message'] ?? '',
-          id: map['id'],
-          eventType: EventType.other,
-          notificationModel: NotificationModel.fromMap(
-            map['notificationModel'],
-          ),
-        );
+        EventType.other => OtherEventModel(
+            time: time,
+            createdAt: createdAt,
+            message: message,
+            id: id,
+            eventType: eventType,
+            notificationModel: notificationModel,
+          )
+      };
+    } catch (e, st) {
+      loggerService.error('Error parsing IEventModel from map: $e', st);
+      rethrow;
     }
   }
 
   Map<String, dynamic> toMap() {
     return {
-      'id': id,
-      'time': '${time.hour}:${time.minute}',
+      'id': id.id.hexString,
+      'time': time.toIso8601String(),
       'message': message,
       'eventType': eventType.name,
       'notificationModel': notificationModel.toMap(),
+      'createdAt': createdAt.toIso8601String(),
+    };
+  }
+
+  Map<String, dynamic> toMongoMap() {
+    return {
+      'id': id,
+      'time': time.toIso8601String(),
+      'message': message,
+      'eventType': eventType.name,
+      'notificationModel': notificationModel.toMongoMap(),
       'createdAt': createdAt.toIso8601String(),
     };
   }
@@ -111,13 +194,13 @@ abstract class IEventModel {
 
 class SleepEventModel extends IEventModel {
   SleepEventModel({
+    super.id,
+    super.createdAt,
     required super.eventType,
-    required super.id,
     required super.time,
-    required super.createdAt,
+    required super.notificationModel,
     required this.sleepType,
     required this.linkedID,
-    required super.notificationModel,
     super.message,
   });
 
@@ -127,6 +210,16 @@ class SleepEventModel extends IEventModel {
   @override
   Map<String, dynamic> toMap() {
     final map = super.toMap();
+    map.addAll({
+      'sleepType': sleepType.name,
+      'linkedID': linkedID,
+    });
+    return map;
+  }
+
+  @override
+  Map<String, dynamic> toMongoMap() {
+    final map = super.toMongoMap();
     map.addAll({
       'sleepType': sleepType.name,
       'linkedID': linkedID,
@@ -156,6 +249,15 @@ class FeedEventModel extends IEventModel {
   @override
   Map<String, dynamic> toMap() {
     final map = super.toMap();
+    map.addAll({
+      'amount': amount,
+    });
+    return map;
+  }
+
+  @override
+  Map<String, dynamic> toMongoMap() {
+    final map = super.toMongoMap();
     map.addAll({
       'amount': amount,
     });

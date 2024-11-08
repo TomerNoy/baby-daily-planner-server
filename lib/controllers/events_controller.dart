@@ -1,89 +1,101 @@
 import 'package:myserver/controllers/global_functions.dart';
 import 'package:myserver/controllers/responses.dart';
+import 'package:myserver/models/event.dart';
 import 'package:myserver/services/services.dart';
 import 'package:shelf/shelf.dart';
 
 class EventsController {
   /// gets all user events
   static Future<Response> events(Request req) async {
-    final userId = GlobalFunctions.extractUserId(req);
-    if (userId == null) {
-      return Responses.forbidden('user not found');
-    }
-
-    final user = await mongoService.getUserById(userId);
-    if (user == null) {
-      return Responses.forbidden('user not found');
-    }
-
-    final body = await GlobalFunctions.extractBody(req);
-    if (body == null) {
-      return Responses.badRequest('body cannot be empty');
-    }
-
-    final deviceToken = body['deviceToken'] as String;
-    if (deviceToken.isEmpty) {
-      loggerService.error('deviceToken was empty');
-    } else {
-      final deviceTokenUpdated =
-          await mongoService.updateDeviceToken(userId, deviceToken);
-      if (!deviceTokenUpdated) {
-        loggerService.error('Failed to update device token');
+    try {
+      final userId = GlobalFunctions.extractUserId(req);
+      if (userId == null) {
+        return Responses.forbidden('user not found');
       }
+
+      final userModel = await mongoService.getUserById(userId);
+      if (userModel == null) {
+        return Responses.forbidden('user not found');
+      }
+
+      final body = await GlobalFunctions.extractBody(req);
+      if (body == null) {
+        return Responses.badRequest('body cannot be empty');
+      }
+
+      final deviceToken = body['deviceToken'] as String;
+      if (deviceToken.isEmpty) {
+        loggerService.error('deviceToken was empty');
+      } else {
+        final deviceTokenUpdated =
+            await mongoService.updateDeviceToken(userId, deviceToken);
+        if (!deviceTokenUpdated) {
+          loggerService.error('Failed to update device token');
+        }
+      }
+
+      final events = userModel.events.map((e) => e.toMap()).toList();
+
+      return Responses.ok({'events': events});
+    } catch (e, st) {
+      loggerService.error('events error: $e', st);
+      return Responses.serverError('Failed to get events');
     }
-
-    final events = user['events'] as List<dynamic>? ?? [];
-
-    return Responses.ok({'events': events});
   }
 
   /// adds event to a user and returns the event id
   static Future<Response> addEvent(Request req) async {
-    final userId = GlobalFunctions.extractUserId(req);
-    if (userId == null) {
-      return Responses.forbidden('user not found');
-    }
+    try {
+      final userId = GlobalFunctions.extractUserId(req);
+      if (userId == null) {
+        return Responses.forbidden('user not found');
+      }
 
-    final body = await GlobalFunctions.extractBody(req);
-    if (body == null) {
-      return Responses.badRequest('body cannot be empty');
-    }
+      final body = await GlobalFunctions.extractBody(req);
+      if (body == null) {
+        return Responses.badRequest('body cannot be empty');
+      }
 
-    final event = body['event'];
-    if (event == null || event.isEmpty) {
-      return Responses.badRequest('event cannot be empty');
-    }
+      final event = body['event'];
+      if (event == null || event.isEmpty) {
+        return Responses.badRequest('event cannot be empty');
+      }
 
-    final user = await mongoService.getUserById(userId);
-    if (user == null) {
-      return Responses.notFound('user not found');
-    }
+      final eventModel = IEventModel.createEvent(event);
 
-    final eventStringId = mongoService.generateId();
-    event['id'] = eventStringId;
+      loggerService.debug('eventModel: $eventModel');
 
-    // final isPushOn = event['isPushOn'] as bool?;
-    //
-    // if (isPushOn == null) {
-    //   loggerService.error('isPushOn was null', StackTrace.current);
-    // }
+      if (eventModel == null) {
+        return Responses.badRequest('Invalid event data');
+      }
 
-    // if (isPushOn!) {
-    //   final taskUuid = await NotificationsController.createNotificationTask(
-    //     userId: userId,
-    //     eventId: eventStringId,
-    //     time: event['time'] as String,
-    //   );
-    //
-    //   loggerService.debug('addNotification task: $taskUuid');
-    // }
+      // final isPushOn = event['isPushOn'] as bool?;
+      //
+      // if (isPushOn == null) {
+      //   loggerService.error('isPushOn was null', StackTrace.current);
+      // }
+      // if (isPushOn!) {
+      //   final taskUuid = await NotificationsController.createNotificationTask(
+      //     userId: userId,
+      //     eventId: eventStringId,
+      //     time: event['time'] as String,
+      //   );
+      //
+      //   loggerService.debug('addNotification task: $taskUuid');
+      // }
 
-    final newEvent = await mongoService.addEventToUser(userId, event);
-    if (newEvent == null) {
+      final addEventToUser =
+          await mongoService.addEventToUser(userId, eventModel);
+
+      if (!addEventToUser) {
+        return Responses.serverError('Failed to add event');
+      }
+
+      return Responses.ok({'event': eventModel.toMap()});
+    } catch (e, st) {
+      loggerService.error('addEvent error: $e', st);
       return Responses.serverError('Failed to add event');
     }
-
-    return Responses.ok({'event': newEvent});
   }
 
   /// updates event by key-value pair
@@ -98,35 +110,18 @@ class EventsController {
       return Responses.badRequest('body cannot be empty');
     }
 
-    final user = await mongoService.getUserById(userId);
-    if (user == null) {
-      return Responses.notFound('User not found');
-    }
-
     final updateData = body['update'] as Map<String, dynamic>?;
     if (updateData == null || updateData.isEmpty) {
       return Responses.badRequest('Update data cannot be empty');
     }
 
-    final eventId = updateData['id'] as String?;
-    if (eventId == null || eventId.isEmpty) {
-      return Responses.badRequest('Invalid event ID or update data');
-    }
-    updateData.remove('id');
+    final eventModel = await mongoService.updateEvent(userId, updateData);
 
-    final eventExists =
-        mongoService.checkIsEventExists(user['events'], eventId);
-    if (!eventExists) {
-      return Responses.notFound('Event not found');
-    }
-
-    final event = await mongoService.updateEvent(userId, eventId, updateData);
-
-    if (event == null) {
+    if (eventModel == null) {
       return Responses.serverError('Failed to update event');
     }
 
-    return Responses.ok({'event': event});
+    return Responses.ok({'event': eventModel.toMap()});
   }
 
   /// adds events to a user and returns the event id todo test
@@ -146,19 +141,22 @@ class EventsController {
       return Responses.badRequest('event cannot be empty');
     }
 
-    final user = await mongoService.getUserById(userId);
-    if (user == null) {
-      return Responses.notFound('user not found');
-    }
-
     final eventsResponse = [];
 
     for (dynamic event in events) {
-      final newEvent = await mongoService.addEventToUser(userId, event);
-      if (newEvent == null) {
+      final eventModel = IEventModel.createEvent(event);
+      if (eventModel == null) {
+        return Responses.badRequest('Invalid event data');
+      }
+
+      final addEventToUser =
+          await mongoService.addEventToUser(userId, eventModel);
+
+      if (!addEventToUser) {
         return Responses.serverError('Failed to add event');
       }
-      eventsResponse.add(newEvent);
+
+      eventsResponse.add(eventModel.toMap());
     }
 
     return Responses.ok({'events': eventsResponse});

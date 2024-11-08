@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:myserver/models/event.dart';
+import 'package:myserver/models/user.dart';
 import 'package:myserver/services/dotenv_service.dart';
 import 'package:myserver/services/notification_service.dart';
 import 'package:myserver/services/services.dart';
@@ -53,66 +55,92 @@ class MongoService {
     }
   }
 
-  Future<String?> addNewUser() async {
-    final newUser = {'createdAt': DateTime.now(), 'events': []};
+  Future<UserModel?> addNewUser() async {
+    final newUser = UserModel();
+
     try {
-      final user = await _usersCollection?.insertOne(newUser);
+      final user = await _usersCollection?.insertOne(newUser.toMongoMap());
       if (user == null || !user.isSuccess) {
+        loggerService.error('addNewUser failed to add user');
+        return null;
+      }
+      return newUser;
+    } catch (e) {
+      loggerService.error('addNewUser error $e');
+      return null;
+    }
+  }
+
+  Future<bool> checkIfUserExists(String userId) async {
+    try {
+      final count = await _usersCollection?.count(
+        _userQuery(userId),
+      );
+      return (count ?? 0) > 0;
+    } catch (e) {
+      loggerService.error('checkIfUserExists error $e');
+      return false;
+    }
+  }
+
+  Future<UserModel?> getUserById(String userId) async {
+    try {
+      final user = await _usersCollection?.findOne(_userQuery(userId));
+      if (user?.isEmpty ?? true) {
+        loggerService.error('getUserById failed to get user');
         return null;
       }
 
-      final userId = (user.id as ObjectId).id.hexString;
-      return userId;
-    } catch (e) {
+      loggerService.debug('getUserById user: $user');
+
+      final userModel = UserModel.fromMap(user!);
+      return userModel;
+    } catch (e, st) {
+      loggerService.error('getUserById error $e', st);
       return null;
     }
   }
 
-  Future<Map<String, dynamic>?> getUserById(String userId) async {
+  Future<bool> addEventToUser(String userId, IEventModel eventModel) async {
     try {
-      final user = await _usersCollection?.findOne(_userQuery(userId));
-      return user;
-    } catch (e) {
-      loggerService.error('findUserFromDB error $e');
-      return null;
-    }
-  }
-
-  String generateId() => ObjectId().id.hexString;
-
-  Future<Map<String, dynamic>?> addEventToUser(
-    String userId,
-    Map<String, dynamic> event,
-  ) async {
-    try {
-      event['id'] = ObjectId.fromHexString(event['id']);
       final updateResult = await _usersCollection?.updateOne(
         _userQuery(userId),
-        modify.push('events', event),
+        modify.push('events', eventModel.toMongoMap()),
       );
 
+      loggerService.debug('updateResult: ${updateResult?.isAcknowledged}');
+
       if (updateResult?.isAcknowledged ?? false) {
-        return event;
+        return true;
       }
-      loggerService.error('addEventToUser failed to add event');
-      return null;
-    } catch (e) {
-      loggerService.error('addEventToUser error $e');
-      return null;
+      loggerService.error(
+        'addEventToUser failed to add event',
+        StackTrace.current,
+      );
+      return false;
+    } catch (e, st) {
+      loggerService.error('addEventToUser error $e', st);
+      return false;
     }
   }
 
-  Future<Map<String, dynamic>?> updateEvent(
+  Future<IEventModel?> updateEvent(
     String userId,
-    String eventId,
     Map<String, dynamic> updateData,
   ) async {
+    final eventId = updateData['id'] as String?;
+    if (eventId?.isEmpty == true) {
+      loggerService.error('updateEvent eventId is empty');
+      return null;
+    }
+    updateData.remove('id');
     try {
+      loggerService.debug('updateEvent $updateData');
       final updateResult = await _usersCollection?.findAndModify(
         returnNew: true,
         query: {
           '_id': _getObjectId(userId),
-          'events.id': _getObjectId(eventId),
+          'events.id': _getObjectId(eventId!),
         },
         update: {
           '\$set': updateData.map(
@@ -124,9 +152,15 @@ class MongoService {
         loggerService.error('updateResult $updateResult');
         return null;
       }
-      return updateResult!['events'].firstWhere(
-        (e) => e['id'] == _getObjectId(eventId),
+      final updatedEvent = updateResult!['events'].firstWhere(
+        (e) => e['id'] == _getObjectId(eventId!),
       );
+
+      print('updatedEvent: $updatedEvent');
+
+      final eventModel = IEventModel.fromMap(updatedEvent);
+
+      return eventModel;
     } catch (e) {
       loggerService.error('updateEvent error $e');
       return null;
@@ -168,7 +202,7 @@ class MongoService {
     return events.any((e) => e['id'] == _getObjectId(eventId));
   }
 
-  Future<Map<String, dynamic>?> getEventFromUserId(
+  Future<IEventModel?> getEventFromUserId(
     String userId,
     String eventId,
   ) async {
@@ -183,7 +217,8 @@ class MongoService {
         loggerService.error('getEventFromUser failed to get event');
         return null;
       }
-      return event;
+      final eventModel = IEventModel.fromMap(event!);
+      return eventModel;
     } catch (e) {
       return null;
     }
@@ -200,17 +235,6 @@ class MongoService {
       return false;
     }
     return true;
-  }
-
-  Map<String, dynamic>? getEventFromUser(
-    Map<String, dynamic> user,
-    String eventId,
-  ) {
-    final events = user['events'] as List<dynamic>? ?? [];
-    return events.firstWhere(
-      (e) => e['id'] == _getObjectId(eventId),
-      orElse: () => null,
-    );
   }
 
   Future<bool> _deleteEventsFromUser(String userId,

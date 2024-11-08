@@ -1,5 +1,6 @@
 import 'package:myserver/controllers/global_functions.dart';
 import 'package:myserver/controllers/responses.dart';
+import 'package:myserver/models/event.dart';
 import 'package:myserver/services/services.dart';
 import 'package:shelf/shelf.dart';
 
@@ -10,7 +11,12 @@ class NotificationsController {
     required String eventId,
     required String time,
   }) async {
-    final schedule = _parseEventTime(time);
+    final schedule = DateTime.tryParse(time);
+
+    if (schedule == null) {
+      loggerService.error('Invalid time format');
+      return null;
+    }
 
     final task = await notificationService.createCloudTask(
       userId: userId,
@@ -108,14 +114,15 @@ class NotificationsController {
       return Responses.ok();
     }
 
-    final deviceToken = user['deviceToken'];
-    if (deviceToken == null) {
+    final deviceToken = user.deviceToken;
+    if (deviceToken.isEmpty) {
       loggerService.error('deviceToken was null', StackTrace.current);
       return Responses.ok();
     }
     final decryptedToken = decryptionService.decryptToken(deviceToken);
 
-    final event = mongoService.getEventFromUser(user, eventId);
+    final event = user.eventById(eventId);
+
     if (event == null) {
       loggerService.error('event not found', StackTrace.current);
       return Responses.ok();
@@ -123,7 +130,7 @@ class NotificationsController {
 
     final title = _getEventTitle(event);
 
-    final message = event['message'] as String? ?? '';
+    final message = event.message;
 
     // send push to client
     try {
@@ -138,15 +145,10 @@ class NotificationsController {
     }
 
     // schedule next notification
-    final time = event['time'] as String?;
-
-    if (time == null) {
-      loggerService.error('event time is null');
-      return Responses.ok();
-    }
+    final time = event.time;
 
     try {
-      final schedule = _parseEventTime(time).add(Duration(days: 1));
+      final schedule = time.add(Duration(days: 1));
       await notificationService.createCloudTask(
         userId: userId,
         eventId: eventId,
@@ -163,20 +165,10 @@ class NotificationsController {
     return Responses.ok();
   }
 
-  /// global functions
-  static DateTime _parseEventTime(String time) {
-    final parts = time.split(':');
-    return DateTime.now().copyWith(
-      hour: int.tryParse(parts[0]),
-      minute: int.tryParse(parts[1]),
-      second: 0,
-    );
-  }
-
-  static String _getEventTitle(Map<String, dynamic> event) {
-    return switch (event['eventType']) {
-      'feed' => 'Baby Feed',
-      'sleep' => 'Baby Sleep ${event['sleepType']?.toUpperCase() ?? 'UNKNOWN'}',
+  static String _getEventTitle(IEventModel event) {
+    return switch (event.eventType) {
+      EventType.feed => 'Baby Feed',
+      EventType.sleep => 'Baby Sleep ${event.eventType.name.toUpperCase()}',
       _ => 'Baby Event',
     };
   }

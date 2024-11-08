@@ -10,11 +10,11 @@ class AuthController {
   static Future<Response> registerUser(Request req) async {
     // create user
 
-    final userId = await mongoService.addNewUser();
-    if (userId == null) {
+    final userModel = await mongoService.addNewUser();
+    if (userModel == null) {
       return Responses.serverError('creating user error');
     }
-    return _returnTokens(userId);
+    return _returnTokens(userModel.idString);
   }
 
   /// reactivates expired tokens by validating token and secret.
@@ -24,6 +24,11 @@ class AuthController {
       final userId = GlobalFunctions.extractUserId(req);
       if (userId == null) {
         return Responses.forbidden('Invalid refresh token');
+      }
+
+      final userExists = await mongoService.checkIfUserExists(userId);
+      if (!userExists) {
+        return Responses.forbidden('User not found');
       }
 
       // return tokens

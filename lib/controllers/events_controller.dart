@@ -1,4 +1,5 @@
 import 'package:myserver/controllers/global_functions.dart';
+import 'package:myserver/controllers/notifications_controller.dart';
 import 'package:myserver/controllers/responses.dart';
 import 'package:myserver/models/event.dart';
 import 'package:myserver/services/services.dart';
@@ -69,26 +70,25 @@ class EventsController {
         return Responses.badRequest('Invalid event data');
       }
 
-      // final isPushOn = event['isPushOn'] as bool?;
-      //
-      // if (isPushOn == null) {
-      //   loggerService.error('isPushOn was null', StackTrace.current);
-      // }
-      // if (isPushOn!) {
-      //   final taskUuid = await NotificationsController.createNotificationTask(
-      //     userId: userId,
-      //     eventId: eventStringId,
-      //     time: event['time'] as String,
-      //   );
-      //
-      //   loggerService.debug('addNotification task: $taskUuid');
-      // }
-
       final addEventToUser =
           await mongoService.addEventToUser(userId, eventModel);
 
       if (!addEventToUser) {
         return Responses.serverError('Failed to add event');
+      }
+
+      final isPushOn = eventModel.notificationModel.isPushOn;
+
+      if (isPushOn) {
+        final taskName = await NotificationsController.createNotificationTask(
+          userId: userId,
+          eventModel: eventModel,
+          // eventId: eventModel.idString,
+          // time: event['time'] as String,
+          // taskId: eventModel.notificationModel.scheduledTaskIdString,
+        );
+
+        loggerService.debug('addNotification task: $taskName');
       }
 
       return Responses.ok({'event': eventModel.toMap()});
@@ -186,12 +186,6 @@ class EventsController {
 
     final eventDeleted =
         await mongoService.deleteEventFromUser(eventId, userId);
-
-    // final eventNotificationDeleted =
-    //     await NotificationsController.deleteNotificationTask(
-    //   userId: userId,
-    //   eventId: eventId,
-    // );
 
     if (!eventDeleted) {
       loggerService.error('Failed to delete event', StackTrace.current);

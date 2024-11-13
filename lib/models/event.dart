@@ -81,6 +81,8 @@ abstract class IEventModel {
     }
   }
 
+  String get idString => id.id.hexString;
+
   factory IEventModel.fromMap(Map<String, dynamic> map) {
     loggerService.debug('IEventModel.fromMap: $map');
 

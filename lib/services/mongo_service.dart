@@ -3,17 +3,15 @@ import 'dart:io';
 import 'package:myserver/models/event.dart';
 import 'package:myserver/models/user.dart';
 import 'package:myserver/services/dotenv_service.dart';
-import 'package:myserver/services/notification_service.dart';
 import 'package:myserver/services/services.dart';
 
 import '../config/constants.dart';
 import 'package:mongo_dart/mongo_dart.dart';
 
 class MongoService {
-  MongoService(this._dotEnvService, this._notificationService);
+  MongoService(this._dotEnvService);
 
   final DotEnvService _dotEnvService;
-  final NotificationService _notificationService;
 
   Db? _db;
 
@@ -113,6 +111,7 @@ class MongoService {
       if (updateResult?.isAcknowledged ?? false) {
         return true;
       }
+
       loggerService.error(
         'addEventToUser failed to add event',
         StackTrace.current,
@@ -207,20 +206,75 @@ class MongoService {
     String eventId,
   ) async {
     try {
-      final event = await _usersCollection?.findOne(
-        _userQuery(userId).fields(['events']).eq(
-          'events.id',
-          _getObjectId(eventId),
-        ),
-      );
-      if (event?.isEmpty ?? true) {
+      final pipeline = [
+        {
+          r'$match': {
+            '_id': _getObjectId(userId),
+          }
+        },
+        {r'$unwind': r'$events'},
+        {
+          r'$match': {
+            'events.id': _getObjectId(eventId),
+          }
+        },
+        {
+          r'$project': {
+            'events': 1,
+          }
+        }
+      ];
+
+      final result =
+          await _usersCollection?.aggregateToStream(pipeline).toList();
+
+      if (result == null || result.isEmpty) {
         loggerService.error('getEventFromUser failed to get event');
         return null;
       }
+
+      final event = result.first['events'];
+
+      if (event?.isEmpty) {
+        loggerService.error('getEventFromUser failed to get event');
+        return null;
+      }
+
+      loggerService.debug('getEventFromUser event: $event');
+
       final eventModel = IEventModel.fromMap(event!);
       return eventModel;
     } catch (e) {
       return null;
+    }
+  }
+
+  String get newTaskId => ObjectId().id.hexString;
+
+  Future<bool> updateNotificationId(
+      String userId, String eventId, String newTaskId) async {
+    try {
+      final query = _userQuery(userId).eq('events.id', _getObjectId(eventId));
+      final update = modify
+          .set(
+            'events.\$.notificationModel.scheduledTaskId',
+            ObjectId.fromHexString(newTaskId),
+          )
+          .set(
+            'events.\$.notificationModel.lastModified',
+            DateTime.now().toIso8601String(),
+          );
+      final result = await _usersCollection?.updateOne(query, update);
+      if (result == null || !result.isAcknowledged) {
+        loggerService
+            .error('updating scheduledTaskId failed: ${result?.errmsg}');
+        return false;
+      }
+
+      return true;
+    } catch (e, st) {
+      loggerService.error('updateNotificationId error $e', st);
+      return false;
     }
   }
 

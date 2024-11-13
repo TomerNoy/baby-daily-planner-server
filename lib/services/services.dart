@@ -33,10 +33,7 @@ class ServiceProvider {
       // mongo
       _getIt.registerSingletonAsync(
         () async {
-          final mongoService = MongoService(
-            dotEnvService,
-            notificationService,
-          );
+          final mongoService = MongoService(dotEnvService);
           await mongoService.connect();
           return mongoService;
         },

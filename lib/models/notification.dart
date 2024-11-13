@@ -50,6 +50,8 @@ class NotificationModel {
     };
   }
 
+  String get scheduledTaskIdString => scheduledTaskId.id.hexString;
+
   @override
   String toString() {
     return 'NotificationModel{scheduledTaskId: $scheduledTaskId, lastModified: $lastModified, isPushOn: $isPushOn}';

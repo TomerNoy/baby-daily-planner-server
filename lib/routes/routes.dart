@@ -83,16 +83,8 @@ Router getRouter() {
 
   router.post(Constants.queueResponse, (req) {
     return Pipeline()
-        .addHandler(NotificationsController.sendNotificationToClient)
+        .addHandler(NotificationsController.queueResponse)
         .call(req);
-  });
-
-  router.post(Constants.toggleNotification, (Request req, String eventId) {
-    return Pipeline()
-        .addMiddleware(tokenMiddleware(TokenType.access))
-        .addHandler((Request innerReq) {
-      return NotificationsController.toggleNotification(innerReq, eventId);
-    }).call(req);
   });
 
   router.post(Constants.pauseResumeNotifications, (Request req) {

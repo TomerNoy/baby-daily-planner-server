@@ -35,7 +35,7 @@ class Constants {
   static const location = 'projects/baby-daily-planner/locations/us-central1';
   static const queueName = '$location/queues/notification-task-queue';
   static const serverCallbackUrl =
-      'https://7481-2a00-a041-3a25-a00-b070-c150-a069-ef17.ngrok-free.app/notifications/queue-response';
+      'https://5894-2a00-a041-3a25-a00-a51c-ceca-6dd3-f7e1.ngrok-free.app/notifications/queue-response';
   static const taskHttpMethod = 'POST';
   static const sendPushUrl =
       'https://fcm.googleapis.com/v1/projects/baby-daily-planner/messages:send';

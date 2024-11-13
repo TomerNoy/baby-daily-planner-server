@@ -8,64 +8,32 @@ class NotificationsController {
   /// creates a notification task
   static Future<String?> createNotificationTask({
     required String userId,
-    required String eventId,
-    required String time,
+    required IEventModel eventModel,
   }) async {
-    final schedule = DateTime.tryParse(time);
+    final now = DateTime.now();
 
-    if (schedule == null) {
-      loggerService.error('Invalid time format');
-      return null;
+    var schedule = now.copyWith(
+      hour: eventModel.time.hour,
+      minute: eventModel.time.minute,
+      second: 0,
+    );
+
+    if (schedule.isBefore(now)) {
+      schedule = schedule.add(Duration(days: 1));
+      loggerService.debug('time was changed to tomorrow $schedule');
     }
 
-    final task = await notificationService.createCloudTask(
+    final taskName = await notificationService.createCloudTask(
       userId: userId,
-      eventId: eventId,
+      eventModel: eventModel,
       schedule: schedule,
     );
 
-    if (task == null) {
+    if (taskName == null) {
       loggerService.error('Failed to schedule notification');
       return null;
     }
-    return task;
-  }
-
-  /// delete a notification task
-  // static Future<bool> deleteNotificationTask({
-  //   required String userId,
-  //   required String eventId,
-  // }) async {
-  //   final task = await notificationService.deleteCloudTask(userId, eventId);
-  //
-  //   if (task == null) {
-  //     loggerService.error('Failed to schedule notification');
-  //     return false;
-  //   }
-  //   return true;
-  // }
-
-  /// toggle push notification for an event
-  static Future<Response> toggleNotification(
-      Request req, String eventId) async {
-    final userId = GlobalFunctions.extractUserId(req);
-    if (userId == null) {
-      return Responses.forbidden('user not found');
-    }
-
-    final body = await GlobalFunctions.extractBody(req);
-    if (body == null) {
-      return Responses.badRequest('body cannot be empty');
-    }
-
-    final isPushOn = body['isPushOn'] as bool?;
-
-    loggerService.debug('isPushOn: $isPushOn for eventId: $eventId');
-    if (isPushOn == null) {
-      return Responses.badRequest('isPushOn cannot be null');
-    }
-
-    return Responses.ok();
+    return taskName;
   }
 
   /// toggle push notification for all events
@@ -91,7 +59,7 @@ class NotificationsController {
   }
 
   /// sends a push notification to a client
-  static Future<Response> sendNotificationToClient(Request req) async {
+  static Future<Response> queueResponse(Request req) async {
     final body = await GlobalFunctions.extractBody(req);
     if (body == null) {
       loggerService.error('Invalid request body', StackTrace.current);
@@ -102,6 +70,7 @@ class NotificationsController {
 
     final userId = body['userId'];
     final eventId = body['eventId'];
+    final taskId = body['taskId'];
 
     if (userId == null || eventId == null) {
       loggerService.error('Missing required fields', StackTrace.current);
@@ -114,6 +83,34 @@ class NotificationsController {
       return Responses.ok();
     }
 
+    final eventModel = user.eventById(eventId);
+
+    if (eventModel == null) {
+      loggerService.error('event not found', StackTrace.current);
+      return Responses.ok();
+    }
+
+    // check if push is on
+    final isPushOn = eventModel.notificationModel.isPushOn;
+    if (!isPushOn) {
+      loggerService.debug('Push notification was off');
+      return Responses.ok();
+    }
+
+    // check time is within 1 minute
+    final now = DateTime.now();
+    final duration = Duration(seconds: 65);
+    if (eventModel.time.difference(now).abs() > duration) {
+      loggerService.debug('Time diff was not within 65s');
+      return Responses.ok();
+    }
+
+    // check if id matches
+    if (eventModel.notificationModel.scheduledTaskIdString != taskId) {
+      loggerService.error('taskId did not match', StackTrace.current);
+      return Responses.ok();
+    }
+
     final deviceToken = user.deviceToken;
     if (deviceToken.isEmpty) {
       loggerService.error('deviceToken was null', StackTrace.current);
@@ -121,16 +118,9 @@ class NotificationsController {
     }
     final decryptedToken = decryptionService.decryptToken(deviceToken);
 
-    final event = user.eventById(eventId);
+    final title = _getEventTitle(eventModel);
 
-    if (event == null) {
-      loggerService.error('event not found', StackTrace.current);
-      return Responses.ok();
-    }
-
-    final title = _getEventTitle(event);
-
-    final message = event.message;
+    final message = eventModel.message;
 
     // send push to client
     try {
@@ -145,15 +135,27 @@ class NotificationsController {
     }
 
     // schedule next notification
-    final time = event.time;
+    final time = DateTime.now().copyWith(
+      hour: eventModel.time.hour,
+      minute: eventModel.time.minute,
+      second: 0,
+    );
+
+    final newTaskId = mongoService.newTaskId;
 
     try {
       final schedule = time.add(Duration(days: 1));
-      await notificationService.createCloudTask(
+      final taskName = await notificationService.createCloudTask(
         userId: userId,
-        eventId: eventId,
+        eventModel: eventModel,
         schedule: schedule,
       );
+
+      if (taskName == null) {
+        loggerService.error('Failed to schedule notification');
+      } else {
+        loggerService.debug('Task scheduled: $taskName');
+      }
     } catch (e) {
       loggerService.error(
         'Failed to schedule notification',
@@ -162,6 +164,19 @@ class NotificationsController {
       );
       return Responses.ok();
     }
+
+    // update notification id
+    final update = await mongoService.updateNotificationId(
+      userId,
+      eventId,
+      newTaskId,
+    );
+
+    if (!update) {
+      loggerService.error('Failed to update notification id');
+      return Responses.ok();
+    }
+
     return Responses.ok();
   }
 
